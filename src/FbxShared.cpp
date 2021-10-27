@@ -46,6 +46,8 @@ FbxMesh* FbxSceneShared::firstMesh(FbxNode* pNode) {
 	for (int i=0; i<pNode->GetNodeAttributeCount(); i++)
 		if ((pNode->GetNodeAttributeByIndex(i)->GetAttributeType()==FbxNodeAttribute::eMesh)) return (FbxMesh*)pNode->GetNodeAttributeByIndex(i);
 
+	cout << "Searching for mesh. Reached:" << pNode->GetName() << endl;
+
 	for (int j=0; j<pNode->GetChildCount(); j++) {
 		FbxMesh* pMesh=firstMesh(pNode->GetChild(j));
 		if (pMesh!=NULL) return pMesh;

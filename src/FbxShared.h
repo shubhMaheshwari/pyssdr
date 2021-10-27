@@ -8,6 +8,7 @@
 #pragma once
 
 #include <string>
+#include <iostream>
 #include <fbxsdk.h>
 
 using namespace std;

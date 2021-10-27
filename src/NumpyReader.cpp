@@ -24,10 +24,7 @@ bool readNumpy(MatrixXd vert_data,vector< vector<int> > face_data, DemBonesExt<d
 	for (int s=0; s<model.nS; s++)
 		for (int k=model.fStart(s); k<model.fStart(s+1); k++) model.subjectID(k)=s;
 
-	msg(1, "Reading Eigen array\n");
-
 	// Set model parameters
-	msg(1, "Added Vertices at each timestep\n");
 	model.v.resize(3*model.nF,model.nV);
 	model.fTime.resize(model.nF);
 	for(auto i=0;i<model.fTime.size();i++){
@@ -57,7 +54,9 @@ bool readNumpy(MatrixXd vert_data,vector< vector<int> > face_data, DemBonesExt<d
 	model.orient.resize(model.nS*3, model.nB);
 	model.lockM.resize(model.nB);
 
-
+	// Manually set fTime to 1/25 sec
+	for(auto i=0;i<model.fTime.size();i++)
+		model.fTime[i] = double(i);
 
 	return 1;
 }

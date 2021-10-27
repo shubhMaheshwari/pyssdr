@@ -45,8 +45,32 @@ public:
 	}
 
 	void createMesh(const MatrixXd verts, const vector<vector<int>> faces){
-		FbxMesh pmesh = FbxMesh::Create(lSdkManager,"mesh");
-		pmesh->InitControlPoints(verts.cols())	
+		FbxMesh* pmesh = FbxMesh::Create(lSdkManager,"mesh");
+		pmesh->InitControlPoints(verts.cols());	
+		FbxVector4* pControlPoints = pmesh->GetControlPoints();
+		
+		// Set vertices
+		for(auto i=0;i<verts.cols();i++){
+			FbxVector4 lControlPoint(verts(0,i), verts(1,i), verts(2,i));
+			pControlPoints[i] = lControlPoint;
+		}
+
+		// Set faces
+		for(auto i=0;i<faces.size();i++){
+			pmesh->BeginPolygon(-1.-1,false);
+			for(auto j=0;j<faces[i].size();j++)
+				pmesh->AddPolygon(faces[i][j]);
+			pmesh->EndPolygon();
+		}	
+
+		// Create node in scene
+		FbxNode* pNode = FbxNode::Create(lScene,"mesh");
+		pNode->SetNodeAttribute(pmesh);
+
+		// Add node to scene root
+		lScene->GetRootNode()->AddChild(pNode);
+
+		return;
 	}
 
 	void createJoints(const vector<string>& name, const ArrayXi& parent, double radius) {
@@ -92,30 +116,47 @@ public:
 
 	void setJoints(const vector<string>& name, const VectorXd& fTime, const MatrixXd& lr, const MatrixXd& lt, const MatrixXd& lbr, const MatrixXd& lbt) {
 		// Animation stack & layer.
-		cout << " Set Skinning Weights" << endl;
+		// msg(1, "Settig Joints\n");
+
 
 		FbxString lAnimStackName="demBones";
 		FbxAnimStack* lAnimStack=FbxAnimStack::Create(lScene, lAnimStackName);
 		FbxAnimLayer* lAnimLayer=FbxAnimLayer::Create(lScene, "Base Layer");
 		lAnimStack->AddMember(lAnimLayer);
-		cout << " Set Skinning Weights" << endl;
+		// msg(1, "Defining variables Joints\n");
+
 
 		VectorXd val;
+
+		// msg(1, "Name Size:"<<name.size() << "\n");
+		// msg(1, "Val lr:" <<lr.col(0) << "\n");
+
 		for (int j=0; j!=name.size(); j++) {
-			cout << j << " Set Skinning Weights" << endl;
+			// msg(1, "Name:" << name[j].c_str() << "\n");
+			// msg(1, "Rot Vals:" << lbr(0, j) <<  lbr(1, j) << lbr(2, j) << "\n");
+			// msg(1, "Trans Vals:" << lbt(0, j) <<  lbt(1, j) << lbt(2, j) << "\n");
+
 			FbxNode* lSkeleton=lScene->FindNodeByName(FbxString(name[j].c_str()));
 			lSkeleton->LclRotation.Set(FbxDouble3(lbr(0, j), lbr(1, j), lbr(2, j)));
 			lSkeleton->LclTranslation.Set(FbxDouble3(lbt(0, j), lbt(1, j), lbt(2, j)));
+			// msg(1, "Val lr:" <<lr << "\n");
+
 			val=lr.col(j);
+			// msg(1, "Val lr:" <<lr.col(j) << "\n");
+			
 			addToCurve(Map<VectorXd, 0, InnerStride<3>>(val.data(), val.size()/3), fTime, lSkeleton->LclRotation.GetCurve(lAnimLayer, FBXSDK_CURVENODE_COMPONENT_X, true));
 			addToCurve(Map<VectorXd, 0, InnerStride<3>>(val.data()+1, val.size()/3), fTime, lSkeleton->LclRotation.GetCurve(lAnimLayer, FBXSDK_CURVENODE_COMPONENT_Y, true));
 			addToCurve(Map<VectorXd, 0, InnerStride<3>>(val.data()+2, val.size()/3), fTime, lSkeleton->LclRotation.GetCurve(lAnimLayer, FBXSDK_CURVENODE_COMPONENT_Z, true));
 			val=lt.col(j);
+			// msg(1, "Val lt:" << lt.col(j) << "\n");
+
 			addToCurve(Map<VectorXd, 0, InnerStride<3>>(val.data(), val.size()/3), fTime, lSkeleton->LclTranslation.GetCurve(lAnimLayer, FBXSDK_CURVENODE_COMPONENT_X, true));
 			addToCurve(Map<VectorXd, 0, InnerStride<3>>(val.data()+1, val.size()/3), fTime, lSkeleton->LclTranslation.GetCurve(lAnimLayer, FBXSDK_CURVENODE_COMPONENT_Y, true));
 			addToCurve(Map<VectorXd, 0, InnerStride<3>>(val.data()+2, val.size()/3), fTime, lSkeleton->LclTranslation.GetCurve(lAnimLayer, FBXSDK_CURVENODE_COMPONENT_Z, true));
 		}
-		cout << " Set Skinning Weights" << endl;
+
+	
+		// msg(1, "Settig Joints Completed\n");
 
 	}
 
@@ -123,9 +164,7 @@ public:
 
 	
 	void setSkinCluster(const vector<string>& name, const SparseMatrix<double>& w, const MatrixXd& gb) {
-		cout << " Set Skinning Weights" << endl;
 		FbxMesh* lMesh=firstMesh(lScene->GetRootNode());
-		cout << " Set Skinning Weights" << endl;
 
 		FbxSkin* lSkin=firstSkin(lMesh);
 		if (lSkin==NULL) {
@@ -133,27 +172,22 @@ public:
 			lMesh->AddDeformer(lSkin);
 			lSkin->SetSkinningType(FbxSkin::eLinear);
 		}
-		cout << " Set Skinning Weights" << endl;
 
 		//Clear all clusters
 		while (lSkin->GetClusterCount()) {
 			FbxCluster* lCluster=lSkin->GetCluster(lSkin->GetClusterCount()-1);
 			lSkin->RemoveCluster(lCluster);
 		}
-		cout << " Set Skinning Weights" << endl;
 
 		//Clear all poses
 		while (lScene->GetPoseCount()) lScene->RemovePose(lScene->GetPoseCount()-1);
-		cout << " Set Skinning Weights" << endl;
 
 		//Create a new bind pose
 		FbxPose* lPose=FbxPose::Create(lScene, "demBindPose");
 		lPose->SetIsBindPose(true);
-		cout << " Set Skinning Weights" << endl;
 
 		FbxAMatrix gMat=lMesh->GetNode()->EvaluateGlobalTransform();
 		lPose->Add(lMesh->GetNode(), gMat);
-		cout << " Set Skinning Weights" << endl;
 
 		SparseMatrix<double> wT=w.transpose();
 		int nB=(int)name.size();
@@ -184,7 +218,6 @@ public:
 				lNode=lNode->GetParent();
 			}
 		}
-		cout << " Set Skinning Weights" << endl;
 
 		lScene->AddPose(lPose);
 	}
@@ -195,7 +228,8 @@ bool writeFBXs(string fileName,  DemBonesExt<double, float>& model, bool embedMe
 
 	FbxSceneExporter exporter(embedMedia);
 
-	bool needCreateJoints=(model.boneName.size()==0);
+	// bool needCreateJoints=(model.boneName.size()==0);
+	bool needCreateJoints=true; // Create joint names everytime because saving with new number of bones 
 	double radius;
 
 	if (needCreateJoints) {
@@ -207,28 +241,35 @@ bool writeFBXs(string fileName,  DemBonesExt<double, float>& model, bool embedMe
 		}
 		radius=sqrt((model.u-(model.u.rowwise().sum()/model.nV).replicate(1, model.nV)).cwiseAbs().rowwise().maxCoeff().squaredNorm()/model.nS);
 	}
-
 	for (int s=0; s<model.nS; s++) {
-		msg(1, "--> \""<<fileName<<"\" ");
+		msg(1, "Loaded complete mesh:" << s << "\n");
 
+		msg(1, "--> \""<<fileName<<"\" ");
 		// Write Mesh
 		exporter.createMesh(model.u,model.fv);
 
-		cout << model.boneName.size() << " Bones" << endl;
 		MatrixXd lr, lt, gb, lbr, lbt;
+
 		model.computeRTB(s, lr, lt, gb, lbr, lbt);
-		cout << model.boneName.size() << " Bones" << endl;
 
 		if (needCreateJoints) exporter.createJoints(model.boneName, model.parent, radius);
-		cout << model.boneName.size() << " Bones" << endl;
+		msg(1, "Bonename:" << model.boneName.size() << "\n");
+		msg(1, "Segment:" << model.fTime.segment(model.fStart(s), model.fStart(s+1)-model.fStart(s)).size() << "\n");
+		msg(1, "LR:" << lr.size() << "\n");
+
 	
 		exporter.setJoints(model.boneName, model.fTime.segment(model.fStart(s), model.fStart(s+1)-model.fStart(s)), lr, lt, lbr, lbt);
-		cout << model.boneName.size() << " Bones" << endl;
+
+		msg(1, "W:" << model.w.size() << "\n");
+
+
 		exporter.setSkinCluster(model.boneName, model.w, gb);
-		cout << model.boneName.size() << " Bones" << endl;
+
+		msg(1, "Loaded complete mesh\n");
 
 		if (!exporter.save(fileName)) err("Error on exporting file.\n");
-		cout << model.boneName.size() << " Bones" << endl;
+		msg(1, "Saved mesh\n");
+
 
 		msg(1, "("<<model.fStart(s+1)-model.fStart(s)<<" frames)\n");
 	}

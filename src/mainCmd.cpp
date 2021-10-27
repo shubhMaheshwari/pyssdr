@@ -19,10 +19,11 @@ using namespace std;
 using namespace Eigen;
 using namespace Dem;
 
-class MyDemBones: public DemBonesExt<double, float> {
+class MyDemBones: public DemBonesExt<double, float> { // _Scalar = double, _AnimeshScalar = float 
 public:
 	double tolerance;
 	int patience;
+	double rsme_err;
 
 	MyDemBones(): tolerance(1e-3), patience(3) { nIters=100; }
 
@@ -37,16 +38,16 @@ public:
 	}
 
 	bool cbIterEnd() {
-		double err=rmse();
-		msg(1, "RMSE = "<<err<<"\n");
-		if ((err<prevErr*(1+weightEps))&&((prevErr-err)<tolerance*prevErr)) {
+		rsme_err=rmse();
+		msg(1, "RMSE = "<<rsme_err << "Other values:" << (rsme_err<prevErr*(1+weightEps)) << ((prevErr-rsme_err)<tolerance*prevErr) << "\n");
+		if ((rsme_err<prevErr*(1+weightEps))&&((prevErr-rsme_err)<tolerance*prevErr)) {
 			np--;
 			if (np==0) {
 				msg(1, "    Convergence is reached!\n");
 				return true;
 			}
 		} else np=patience;
-		prevErr=err;
+		prevErr=rsme_err;
 		return false;
 	}
 
@@ -84,13 +85,20 @@ public:
 		return false;
 	}
 
-	int run(MatrixX vert_data,vector< vector<int> > face_data,int init_bones=30,string outFile=""){
+	bool writeFBX(string outFile){
+		cout << "Outfile" << outFile << endl;
+		return writeFBXs(outFile, *this);
+	}
+
+	pybind11::tuple run(MatrixX vert_data,vector< vector<int> > face_data,int init_bones=30,string outFile=""){
+
+		clear(); // Remove all previous data 
+
 		// # Check if output and input is provided
 		msg(1, "Reading Numpy array Rows:" << vert_data.rows() << "Vertices:" << vert_data.cols());
 
 		msg(1, "Parameters:\n");
 
-		msg(1, "    nBones (target)    = "<< nB <<"\n");
 		msg(1, "    nInitIters         = "<< nInitIters << "\n");
 
 		msg(1, "    nIters             = "<< nIters << "\n");
@@ -113,23 +121,22 @@ public:
 		msg(1, "    weightsSmooth      = "<< weightsSmooth<< "\n");
 		msg(1, "    weightsSmoothStep  = "<< weightsSmoothStep<< "\n");
 
-		if (!readNumpy(vert_data,face_data,*this)) return 1;
+		if (!readNumpy(vert_data,face_data,*this)) return pybind11::make_tuple();
 
 		if (nB==0) {
 			nB = init_bones;
-			msg(1, "Initializing bones: 1");
+			msg(1, "Initializing bones:" << nB);
 			init();
 			msg(1, "\n");
 		}
+		msg(1, "    nBones (target)    = "<< nB <<"\n");
 
 		msg(1, "Computing Skinning Decomposition:\n");
 		
 		compute();
 
-
-		if (!writeFBXs(outFile, *this) and outFile!="") return 1;
-
-		return 0;
+		if (!writeFBX(outFile) and outFile!="") return pybind11::make_tuple();
+		return pybind11::make_tuple(this->w,this->m,this->rsme_err);
 	}	
 
 
@@ -150,6 +157,7 @@ PYBIND11_MODULE(pyssdr, handle){
 		)
 	.def(pybind11::init<>())
 	.def("run",&MyDemBones::run)
+	// Hyperparmaters
 	.def_readwrite("weightsSmoothStep",&MyDemBones::weightsSmoothStep)
 	.def_readwrite("weightsSmooth",&MyDemBones::weightsSmooth)
 	.def_readwrite("nnz",&MyDemBones::nnz)
@@ -166,7 +174,32 @@ PYBIND11_MODULE(pyssdr, handle){
 	.def_readwrite("nIters",&MyDemBones::nIters)
 	.def_readwrite("nInitIters",&MyDemBones::nInitIters)
 
-	.def_readwrite("nB",&MyDemBones::nB);
+	.def_readwrite("nB",&MyDemBones::nB)
+	.def_readwrite("nV",&MyDemBones::nV)
+	.def_readwrite("nF",&MyDemBones::nF)
+
+	// Data variables
+	.def_readwrite("w",&MyDemBones::w)
+	.def_readwrite("m",&MyDemBones::m)
+	.def_readwrite("keep_bones",&MyDemBones::keep_bones)
+	.def_readwrite("mTm",&MyDemBones::mTm)
+	.def_readwrite("label",&MyDemBones::label)
+
+	// Commands
+	.def("compute",&MyDemBones::compute)
+	.def("rmse",&MyDemBones::rmse)
+	.def("vertex_rmse",&MyDemBones::vertex_rmse)
+	.def("compute_reconstruction",&MyDemBones::compute_reconstruction)
+	.def("computeWeights",&MyDemBones::computeWeights)
+	.def("computeTranformations",&MyDemBones::computeTranformations)
+	.def("compute_errorVtxBoneALL",&MyDemBones::compute_errorVtxBoneALL)
+	.def("cbIterEnd",&MyDemBones::cbIterEnd)
+	.def("writeFBX",&MyDemBones::writeFBX);
+
+
+
+
+
 
 
 }

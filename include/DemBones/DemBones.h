@@ -13,15 +13,18 @@
 #include <Eigen/StdVector>
 #include <algorithm>
 #include <queue>
+#include <vector>
 #include <set>
+#include <stack>
+#include <iostream>
 #include "ConvexLS.h"
+
 
 #ifndef DEM_BONES_MAT_BLOCKS
 #include "MatBlocks.h"
 #define DEM_BONES_DEM_BONES_MAT_BLOCKS_UNDEFINED
 #endif
 
-#include<iostream>
 
 namespace Dem
 {
@@ -158,6 +161,14 @@ public:
 	//! [<tt>zero indexed</tt>, <tt>read only</tt>] Current weights update iteration number that can be used for callback functions
 	const int& iterWeights;
 	
+
+	// Global update keep bones (bones not removed yet)
+	Eigen::VectorXi keep_bones;	
+
+
+	MatrixX ErrVtxBoneAll;
+
+
 	/** @brief Clear all data
 	*/
 	void clear() {
@@ -193,8 +204,8 @@ public:
 			if (((int)m.rows()!=nF*4)||((int)m.cols()!=nB*4)) { //No transformation
 				int targetNB=nB;
 				//LBG-VQ
-				nB=1;
-				label=Eigen::VectorXi::Zero(nV);
+
+				connected_component(); // Initialize labels, where each component gets a different label
 				computeTransFromLabel();
 		
 				// std::cout << "Computed computeTransFromLabel from single label" << std::endl;
@@ -224,6 +235,9 @@ public:
 
 		if (lockW.size()!=nV) lockW=VectorX::Zero(nV);
 		if (lockM.size()!=nB) lockM=Eigen::VectorXi::Zero(nB);
+		
+		// Set keep bones to all bones 
+		keep_bones = Eigen::ArrayXi::LinSpaced(nB, 0, nB-1);
 	}
 
 	/** @brief Update bone transformations by running #nTransIters iterations with #transAffine and #transAffineNorm regularizers
@@ -241,7 +255,7 @@ public:
 	void computeTranformations() {
 		if (nTransIters==0) return;
 
-		init();
+		// init();
 		cbTranformationsBegin();
 
 		compute_vuT();
@@ -277,13 +291,22 @@ public:
 		Output: #w. Missing #w and/or #m (with zero size) will be initialized by init().
 
 	*/
+	void compute_errorVtxBoneALL(){
+		ErrVtxBoneAll.resize(nV,nB);
+		ErrVtxBoneAll.setZero();
+		for (int i = 0; i < nV; ++i)
+			for (int j = 0; j < nB; ++j)
+				ErrVtxBoneAll(i,j) = errorVtxBone(i,j);
+	}
+
 	void computeWeights() {
 		if (nWeightsIters==0) return;
 		
-		init();
+		// init();
 		cbWeightsBegin();
 		
 		compute_mTm();
+
 
 		aTb=MatrixX::Zero(nB, nV);
 		wSolver.init(nnz);
@@ -305,12 +328,54 @@ public:
 				compute_aTa(i, aTai);
 				aTai=(1-lockW(i))*(aTai/reg_scale+weightsSmooth*MatrixX::Identity(nB, nB))+lockW(i)*MatrixX::Identity(nB, nB);
 				VectorX aTbi=(1-lockW(i))*(aTb.col(i)/reg_scale+weightsSmooth*ws.col(i))+lockW(i)*w.col(i);
-
 				VectorX x=(1-lockW(i))*ws.col(i)+lockW(i)*w.col(i);
-				Eigen::ArrayXi idx=Eigen::ArrayXi::LinSpaced(nB, 0, nB-1);
-				std::sort(idx.data(), idx.data()+nB, [&x](int i1, int i2) { return x(i1)>x(i2); });
-				int nnzi=std::min(nnz, nB);
-				while (x(idx(nnzi-1))<weightEps) nnzi--;
+				VectorX ErrorBone = ErrVtxBoneAll.row(i);
+				// Eigen::ArrayXi idx=Eigen::ArrayXi::LinSpaced(nB, 0, nB-1); 
+
+				// For global update use selected bones
+				Eigen::ArrayXi idx=keep_bones;
+				// idx._set(keep_bones); 
+				// std::cout << "Idx" << idx << std::endl;
+				int modified_nB = int(keep_bones.size());
+
+				std::sort(idx.data(), idx.data()+modified_nB, [&ErrorBone](int i1, int i2) { return ErrorBone(i1)<ErrorBone(i2); });
+			
+
+				// int nnzi=std::min(nnz, nB);
+				// std::cout << "Idx" << idx << std::endl;
+
+				int nnzi=std::min(nnz, modified_nB);
+				// std::cout << "nnzi" << nnzi << std::endl;
+				// std::cout << "x[0]" << x(idx(nnzi-1)) << std::endl;
+				// std::cout << "x[1]" << x(idx(nnzi-2)) << std::endl;
+				// std::cout << "x[2]" << x(idx(nnzi-3)) << std::endl;
+
+				while ((x(idx(nnzi-1))<weightEps)&&nnzi>1){ 
+					nnzi--;
+					// std::cout << "nnzi" << nnzi << std::endl;
+				};
+				// std::cout << "weightEps" << weightEps << std::endl;
+
+
+				// if(i==343){
+				// 	std::cout << "Original:";
+				// 	for (int i = 0; i < modified_nB; ++i){
+				// 	 	std::cout << keep_bones(i) << " ";
+				// 	}
+				// 	std::cout << std::endl;
+				// 	std::cout << "Idx:";
+				// 	for (int i = 0; i < modified_nB; ++i){
+				// 	 	std::cout << idx(i) << " ";
+				// 	}
+				// 	std::cout << std::endl;
+
+				// 	std::cout << "Weights:";
+				// 	for (int i = 0; i < modified_nB; ++i){
+				// 	 	std::cout << x(idx(i)) << " ";
+				// 	}
+				// 	std::cout << std::endl;
+				// }
+
 
 				VectorX x0=w.col(i).toDense().cwiseMax(0.0);
 				x=indexing_vector(x0, idx.head(nnzi));
@@ -319,9 +384,19 @@ public:
 
 				wSolver.solve(indexing_row_col(aTai, idx.head(nnzi), idx.head(nnzi)), indexing_vector(aTbi, idx.head(nnzi)), x, true, true);
 
+				// Debug 0 case
+				// #pragma omp critical
+				// if(i%1000 == 0){
+				// 	for (int j=0; j<nnzi; j++)
+				// 		std::cout << "i " << i << " Bone:" << idx[j] << " Value:" << x(j) << std::endl;
+				// }
+
 				#pragma omp critical
 				for (int j=0; j<nnzi; j++)
 					if (x(j)!=0) trip.push_back(Triplet(idx[j], i, x(j)));
+
+
+
 			}
 
 			w.resize(nB, nV);
@@ -351,6 +426,7 @@ public:
 		for (_iter=0; _iter<nIters; _iter++) {
 			cbIterBegin();
 			computeTranformations();
+			compute_errorVtxBoneALL();
 			computeWeights();
 			if (cbIterEnd()) break;
 		}
@@ -372,6 +448,53 @@ public:
 			e+=ei;
 		}
 		return std::sqrt(e/nF/nV);
+	}
+
+
+	std::vector<_Scalar> vertex_rmse(std::vector<int> vert_inds) {
+		std::vector<_Scalar> vert_recon_err_list;
+		vert_recon_err_list.resize(vert_inds.size());
+
+		for (int ind=0; ind<vert_inds.size(); ind++) {
+			int i = vert_inds[ind];
+			_Scalar ei=0;
+			#pragma omp parallel for
+			for (int k=0; k<nF; k++) {
+				Matrix4 mki;
+				mki.setZero();	
+				for (typename SparseMatrix::InnerIterator it(w, i); it; ++it) mki+=it.value()*m.blk4(k, it.row());
+				#pragma omp atomic
+				ei+=(mki.template topLeftCorner<3, 3>()*u.vec3(subjectID(k), i)+mki.template topRightCorner<3, 1>()-v.vec3(k, i).template cast<_Scalar>()).squaredNorm();
+			}
+			vert_recon_err_list[ind] = std::sqrt(ei/nF);
+		}
+		return vert_recon_err_list;
+	}
+
+	MatrixX compute_reconstruction(std::vector<int> vert_inds){
+		MatrixX reconstructed_pose;
+		reconstructed_pose.resize(3*nF, int(vert_inds.size()));
+
+		// Set value zero 
+		reconstructed_pose.setZero();
+
+		if(vert_inds.size() == 0)
+			return reconstructed_pose;
+
+		#pragma omp parallel for
+		for (int ind = 0; ind < int(vert_inds.size()); ++ind){
+			int i = vert_inds[ind];
+			Matrix4 mki;
+			for(int k=0;k<nF;k++){
+				mki.setZero();
+				for (typename SparseMatrix::InnerIterator it(w, i); it; ++it) mki+=it.value()*m.blk4(k, it.row());
+
+				#pragma omp critical
+				reconstructed_pose.vec3(k,ind) = mki.template topLeftCorner<3, 3>()*u.vec3(subjectID(k), i)+mki.template topRightCorner<3, 1>();
+			}
+		}
+
+		return reconstructed_pose;		 
 	}
 
 	//! Callback function invoked before each spliting of bone clusters in initialization
@@ -403,6 +526,15 @@ public:
 	virtual void cbWeightsIterBegin() {}
 	//! Callback function invoked after each local weights update iteration, stop iteration if return true
 	virtual bool cbWeightsIterEnd() { return false; }
+
+
+	//! mTm.size = (4*nS*nB, 4*nB), where mTm.block<4, 4>(s*nB+i, j) = \sum_{k=fStart(s)}^{fStart(s+1)-1} m.block<3, 4>(k*4, i*4)^T*m.block<3, 4>(k*4, j*4)
+	MatrixX mTm;
+
+
+	//! label(i) is the index of the bone associated with vertex i
+	Eigen::VectorXi label;
+
 
 private:
 	int _iter, _iterTransformations, _iterWeights;
@@ -436,8 +568,56 @@ private:
 		return e;
 	}
 
-	//! label(i) is the index of the bone associated with vertex i
-	Eigen::VectorXi label;
+
+
+	// If bones are not defined create them. 
+	//! Connected Compononent. Assign each component a different label in the beginning 
+	void connected_component(){
+		nB=1;
+		label=Eigen::VectorXi::Constant(nV, -1);		// Run dfs to find connected components
+
+		// Create adg_matrix of mesh 
+		std::vector< std::vector<int> > adj_matrix(nV);
+
+		for (int f = 0; f < (int)fv.size(); ++f){
+			int nf = (int)fv[f].size();
+			for (int ind1 = 0; ind1 < nf; ++ind1){
+				int v1 = fv[f][ind1];
+				int v2 = fv[f][(ind1+1)%nf];
+				adj_matrix[v1].push_back(v2);
+				adj_matrix[v2].push_back(v1);
+			}
+		}
+			
+		int current_vertex,current_children, current_label = 0;
+		std::stack<int> stack;
+
+		for(int i=0;i<nV;i++){
+			if(label(i) != -1) continue; 
+
+			label(i) = current_label;
+			stack.push(i);
+
+			while (!stack.empty()){
+				current_vertex = stack.top();
+				stack.pop();
+				for (auto& it: adj_matrix[current_vertex])
+					if(label(it)==-1){
+						label(it) = current_label;
+						stack.push(it);					
+					}
+
+			}
+
+			std::cout << "Vertex:" << i << " Label:" << current_label << std::endl;
+			current_label++;	
+
+		}
+
+		nB = current_label;	
+
+	}
+
 
 	//! Comparator for heap with smallest values on top
 	struct TripletLess {
@@ -725,9 +905,6 @@ private:
 	}
 
 
-
-	//! mTm.size = (4*nS*nB, 4*nB), where mTm.block<4, 4>(s*nB+i, j) = \sum_{k=fStart(s)}^{fStart(s+1)-1} m.block<3, 4>(k*4, i*4)^T*m.block<3, 4>(k*4, j*4)
-	MatrixX mTm;
 
 	/** Pre-compute mTm for weights update
 	*/
