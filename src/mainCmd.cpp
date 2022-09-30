@@ -90,12 +90,20 @@ public:
 		return writeFBXs(outFile, *this);
 	}
 
-	pybind11::tuple run(MatrixX vert_data,vector< vector<int> > face_data,int init_bones=30,string outFile=""){
+	void load_data(MatrixX vert_data,vector< vector<int> > face_data){
 
 		clear(); // Remove all previous data 
 
 		// # Check if output and input is provided
 		msg(1, "Reading Numpy array Rows:" << vert_data.rows() << "Vertices:" << vert_data.cols());
+		readNumpy(vert_data,face_data,*this);
+		return;
+
+	}	
+
+	pybind11::tuple run_ssdr(int init_bones=30,string outFile=""){
+
+
 
 		msg(1, "Parameters:\n");
 
@@ -121,8 +129,6 @@ public:
 		msg(1, "    weightsSmooth      = "<< weightsSmooth<< "\n");
 		msg(1, "    weightsSmoothStep  = "<< weightsSmoothStep<< "\n");
 
-		if (!readNumpy(vert_data,face_data,*this)) return pybind11::make_tuple();
-
 		if (nB==0) {
 			nB = init_bones;
 			msg(1, "Initializing bones:" << nB);
@@ -137,8 +143,7 @@ public:
 
 		if (!writeFBX(outFile) and outFile!="") return pybind11::make_tuple();
 		return pybind11::make_tuple(this->w,this->m,this->rsme_err);
-	}	
-
+	}
 
 
 private:
@@ -156,7 +161,8 @@ PYBIND11_MODULE(pyssdr, handle){
 		handle,"MyDemBones"
 		)
 	.def(pybind11::init<>())
-	.def("run",&MyDemBones::run)
+	.def("load_data",&MyDemBones::load_data)
+	.def("run_ssdr",&MyDemBones::run_ssdr)
 	// Hyperparmaters
 	.def_readwrite("weightsSmoothStep",&MyDemBones::weightsSmoothStep)
 	.def_readwrite("weightsSmooth",&MyDemBones::weightsSmooth)
@@ -184,15 +190,25 @@ PYBIND11_MODULE(pyssdr, handle){
 	.def_readwrite("keep_bones",&MyDemBones::keep_bones)
 	.def_readwrite("mTm",&MyDemBones::mTm)
 	.def_readwrite("label",&MyDemBones::label)
+	.def_readwrite("lockW",&MyDemBones::lockW)
+	.def_readwrite("lockM",&MyDemBones::lockM)
 
 	// Commands
+	.def("init",&MyDemBones::init)
+	.def("computeTransFromLabel",&MyDemBones::computeTransFromLabel)
+	.def("computeLabel",&MyDemBones::computeLabel)
+	.def("pruneBones",&MyDemBones::pruneBones)
+	.def("labelToWeights",&MyDemBones::labelToWeights)
 	.def("compute",&MyDemBones::compute)
 	.def("rmse",&MyDemBones::rmse)
 	.def("vertex_rmse",&MyDemBones::vertex_rmse)
+	.def("vertex_max_rmse",&MyDemBones::vertex_rmse)
+	.def("rmse_from_cluster",&MyDemBones::rmse_from_cluster)
 	.def("compute_reconstruction",&MyDemBones::compute_reconstruction)
 	.def("computeWeights",&MyDemBones::computeWeights)
 	.def("computeTranformations",&MyDemBones::computeTranformations)
 	.def("compute_errorVtxBoneALL",&MyDemBones::compute_errorVtxBoneALL)
+	.def("errorVtxBone",&MyDemBones::errorVtxBone)
 	.def("cbIterEnd",&MyDemBones::cbIterEnd)
 	.def("writeFBX",&MyDemBones::writeFBX);
 

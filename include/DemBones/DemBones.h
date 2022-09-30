@@ -471,6 +471,29 @@ public:
 		return vert_recon_err_list;
 	}
 
+	std::vector<_Scalar> vertex_max_rmse(std::vector<int> vert_inds) {
+		std::vector<_Scalar> vert_recon_err_list;
+		vert_recon_err_list.resize(vert_inds.size());
+
+		#pragma omp parallel for
+		for (int ind=0; ind<vert_inds.size(); ind++) {
+			int i = vert_inds[ind];
+			_Scalar ei=0;
+			for (int k=0; k<nF; k++) {
+				Matrix4 mki;
+				mki.setZero();	
+				for (typename SparseMatrix::InnerIterator it(w, i); it; ++it) mki+=it.value()*m.blk4(k, it.row());
+				_Scalar eif=(mki.template topLeftCorner<3, 3>()*u.vec3(subjectID(k), i)+mki.template topRightCorner<3, 1>()-v.vec3(k, i).template cast<_Scalar>()).squaredNorm();			
+
+				ei= eif > ei ? eif:ei;
+			}
+			#pragma omp critical
+			vert_recon_err_list[ind] = ei;
+		}
+		return vert_recon_err_list;
+	}
+
+
 	MatrixX compute_reconstruction(std::vector<int> vert_inds){
 		MatrixX reconstructed_pose;
 		reconstructed_pose.resize(3*nF, int(vert_inds.size()));
@@ -536,7 +559,7 @@ public:
 	Eigen::VectorXi label;
 
 
-private:
+// private:
 	int _iter, _iterTransformations, _iterWeights;
 
 	/** Best rigid transformation from covariance matrix
@@ -686,6 +709,50 @@ private:
 			}
 	}
 
+	
+	_Scalar rmse_from_cluster(std::vector<int> vert_inds,bool par=true) {
+		
+		MatrixX cluster_transform=Matrix4::Identity().replicate(nF, 1);
+		_Scalar cluster_error = 0;
+		#pragma omp parallel for if(par)
+		for (int k=0; k<nF; k++) {
+			MatrixX qpT=MatrixX::Zero(4, 4);
+			for (int ind=0; ind<vert_inds.size(); ind++) {
+				int i = vert_inds[ind];
+				qpT.blk4(0, 0)+=Vector4(v.vec3(k, i).template cast<_Scalar>().homogeneous())*u.vec3(subjectID(k), i).homogeneous().transpose();
+			}
+
+			if (qpT(3, 3)!=0) {
+				qpT=qpT/qpT(3, 3);
+				Eigen::JacobiSVD<Matrix3> svd(qpT.template topLeftCorner<3, 3>()-qpT.template topRightCorner<3, 1>()*qpT.template bottomLeftCorner<1, 3>(), Eigen::ComputeFullU|Eigen::ComputeFullV);
+				Matrix3 d=Matrix3::Identity();
+				d(2, 2)=(svd.matrixU()*svd.matrixV().transpose()).determinant();
+				cluster_transform.rotMat(k, 0)=svd.matrixU()*d*svd.matrixV().transpose();
+				cluster_transform.transVec(k, 0)=qpT.template topRightCorner<3, 1>()-cluster_transform.rotMat(k, 0)*qpT.template bottomLeftCorner<1, 3>().transpose();
+			}
+			
+			// std::cout << "Cluster Transform:" << qpT << std::endl;
+			// std::cout << "Cluster Translation:" << cluster_transform.transVec(k,0) << std::endl;
+			// std::cout << "Cluster Rotation:" << cluster_transform.rotMat(k,0) << std::endl;
+
+			for (int ind=0; ind<vert_inds.size(); ind++) {
+				int i = vert_inds[ind];
+				// if(par==false)
+				// 	std::cout << "V':" << cluster_transform.rotMat(k, 0)*u.vec3(subjectID(k), i) << cluster_transform.transVec(k, 0) << v.vec3(k, i).template cast<_Scalar>() << std::endl;
+				#pragma omp atomic
+				cluster_error+=(cluster_transform.rotMat(k, 0)*u.vec3(subjectID(k), i)+cluster_transform.transVec(k, 0)-v.vec3(k, i).template cast<_Scalar>()).squaredNorm();
+			}
+		}
+
+		cluster_error /= nF;
+
+		return cluster_error;
+	}
+
+
+
+
+
 	/** Update bone transformation from label
 	*/
 	void computeTransFromLabel() {
@@ -767,14 +834,19 @@ private:
 		}
 
 		int countID=nB;
+		std::cout << "Spliting Clusters: Orignal:" << nB << std::endl; 
 		_Scalar avgErr=ce.sum()/nB;
-		for (int j=0; j<nB; j++)
+		for (int j=0; j<nB; j++){
+			std::cout << "Can split cluster: Number of vertices constrint:" << (s(j)>threshold*2) << " Avg Error constraint:" <<  (ce(j)>avgErr/100) << std::endl;
 			if ((countID<maxB)&&(s(j)>threshold*2)&&(ce(j)>avgErr/100)) {
 				int newLabel=countID++;
 				int i=seed(j);
 				for (typename SparseMatrix::InnerIterator it(laplacian, i); it; ++it) label(it.row())=newLabel;
 			}
+		}
 		nB=countID;
+		std::cout << "Spliting Clusters: New:" << nB << std::endl; 
+
 	}
 
 	/** Remove bones with small number of associated vertices
