@@ -201,6 +201,7 @@ PYBIND11_MODULE(pyssdr, handle){
 	.def("labelToWeights",&MyDemBones::labelToWeights)
 	.def("compute",&MyDemBones::compute)
 	.def("rmse",&MyDemBones::rmse)
+	.def("clear",&MyDemBones::clear)
 	.def("vertex_rmse",&MyDemBones::vertex_rmse)
 	.def("vertex_max_rmse",&MyDemBones::vertex_rmse)
 	.def("rmse_from_cluster",&MyDemBones::rmse_from_cluster)
