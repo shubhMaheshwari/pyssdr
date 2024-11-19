@@ -8,6 +8,9 @@ include_directories("${PROJECT_SOURCE_DIR}/include")
 find_package(Eigen REQUIRED)
 include_directories("${EIGEN_INCLUDE_DIR}")
 
+message(STATUS "Eigen dir: ${EIGEN_INCLUDE_DIR}")
+
+
 if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
   set(CMAKE_INSTALL_PREFIX "${PROJECT_SOURCE_DIR}" CACHE PATH "..." FORCE)
 endif()
